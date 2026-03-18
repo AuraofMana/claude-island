@@ -17,7 +17,7 @@ private let cornerRadiusInsets = (
 
 struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
-    @StateObject private var sessionMonitor = ClaudeSessionMonitor()
+    @ObservedObject private var sessionMonitor = ClaudeSessionMonitor.shared
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
@@ -106,6 +106,33 @@ struct NotchView: View {
         closedNotchSize.width + expansionWidth
     }
 
+    // MARK: - Closed Context Text
+
+    /// Short text shown in the closed notch bar describing what needs attention
+    private var closedContextText: String? {
+        // Priority 1: permission request, show tool name + first arg preview
+        if let session = sessionMonitor.instances.first(where: { $0.phase.isWaitingForApproval }) {
+            if let toolName = session.pendingToolName {
+                let shortTool = MCPToolFormatter.formatToolName(toolName)
+                if let input = session.pendingToolInput {
+                    let firstLine = input.components(separatedBy: "\n").first ?? ""
+                    let truncated = String(firstLine.prefix(25))
+                    return "\(shortTool): \(truncated)"
+                }
+                return shortTool
+            }
+        }
+        // Priority 2: waiting for input, show "Done" or last message snippet
+        if let session = sessionMonitor.instances.first(where: { $0.phase == .waitingForInput }),
+           waitingForInputTimestamps[session.stableId] != nil {
+            if let msg = session.lastMessage {
+                return String(msg.prefix(30))
+            }
+            return "Done"
+        }
+        return nil
+    }
+
     // MARK: - Corner Radii
 
     private var topCornerRadius: CGFloat {
@@ -183,13 +210,27 @@ struct NotchView: View {
                             viewModel.notchOpen(reason: .click)
                         }
                     }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                guard viewModel.status != .opened else { return }
+                                viewModel.updateDragOffset(value.translation.width)
+                            }
+                            .onEnded { _ in
+                                guard viewModel.status != .opened else { return }
+                                viewModel.commitDragOffset()
+                            }
+                    )
             }
         }
+        .offset(x: viewModel.totalOffset)
         .opacity(isVisible ? 1 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            HotKeyManager.shared.attach(to: viewModel)
+            HotKeyManager.shared.mode = AppSettings.directActionHotkeys ? .directAction : .panelFirst
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -272,10 +313,19 @@ struct NotchView: View {
                     .fill(.clear)
                     .frame(width: closedNotchSize.width - 20)
             } else {
-                // Closed with activity: black spacer (with optional bounce)
-                Rectangle()
-                    .fill(.black)
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
+                // Closed with activity: show context text or black spacer
+                let spacerWidth = closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0)
+                if let contextText = closedContextText {
+                    Text(contextText)
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                        .frame(width: spacerWidth)
+                } else {
+                    Rectangle()
+                        .fill(.black)
+                        .frame(width: spacerWidth)
+                }
             }
 
             // Right side - spinner when processing/pending, checkmark when waiting for input
@@ -419,10 +469,17 @@ struct NotchView: View {
         let currentIds = Set(sessions.map { $0.stableId })
         let newPendingIds = currentIds.subtracting(previousPendingIds)
 
-        if !newPendingIds.isEmpty &&
-           viewModel.status == .closed &&
-           !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
-            viewModel.notchOpen(reason: .notification)
+        if !newPendingIds.isEmpty {
+            // Play per-event-type sound for new permission requests
+            let newSessions = sessions.filter { newPendingIds.contains($0.stableId) }
+            let isQuestion = newSessions.contains { $0.pendingToolName == "AskUserQuestion" }
+            let eventType: SoundEventType = isQuestion ? .askingQuestion : .needsPermission
+            playEventSound(eventType, for: newSessions)
+
+            if viewModel.status == .closed &&
+               !TerminalVisibilityDetector.isTerminalVisibleOnCurrentSpace() {
+                viewModel.notchOpen(reason: .notification)
+            }
         }
 
         previousPendingIds = currentIds
@@ -451,18 +508,8 @@ struct NotchView: View {
             // Get the sessions that just entered waitingForInput
             let newlyWaitingSessions = waitingForInputSessions.filter { newWaitingIds.contains($0.stableId) }
 
-            // Play notification sound if the session is not actively focused
-            if let soundName = AppSettings.notificationSound.soundName {
-                // Check if we should play sound (async check for tmux pane focus)
-                Task {
-                    let shouldPlaySound = await shouldPlayNotificationSound(for: newlyWaitingSessions)
-                    if shouldPlaySound {
-                        await MainActor.run {
-                            NSSound(named: soundName)?.play()
-                        }
-                    }
-                }
-            }
+            // Play per-event-type notification sound
+            playEventSound(.taskComplete, for: newlyWaitingSessions)
 
             // Trigger bounce animation to get user's attention
             DispatchQueue.main.async {
@@ -481,6 +528,23 @@ struct NotchView: View {
         }
 
         previousWaitingForInputIds = currentIds
+    }
+
+    /// Play a sound for the given event type, respecting cooldown and focus state
+    private func playEventSound(_ eventType: SoundEventType, for sessions: [SessionState]) {
+        let sound = AppSettings.soundForEvent(eventType)
+        guard let soundName = sound.soundName else { return }
+        guard SoundCooldownManager.shared.shouldPlay(eventType) else { return }
+
+        Task {
+            let shouldPlay = await shouldPlayNotificationSound(for: sessions)
+            if shouldPlay {
+                await MainActor.run {
+                    NSSound(named: soundName)?.play()
+                    SoundCooldownManager.shared.recordPlayed(eventType)
+                }
+            }
+        }
     }
 
     /// Determine if notification sound should play for the given sessions

@@ -124,9 +124,9 @@ struct SessionState: Equatable, Identifiable, Sendable {
         return sessionId
     }
 
-    /// Display title: summary > first user message > project name
+    /// Display title: user alias > summary > first user message > project name
     var displayTitle: String {
-        conversationInfo.summary ?? conversationInfo.firstUserMessage ?? projectName
+        AppSettings.alias(for: sessionId) ?? conversationInfo.summary ?? conversationInfo.firstUserMessage ?? projectName
     }
 
     /// Best hint for matching window title

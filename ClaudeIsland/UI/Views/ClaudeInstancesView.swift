@@ -129,6 +129,8 @@ struct InstanceRow: View {
     @State private var isHovered = false
     @State private var spinnerPhase = 0
     @State private var isYabaiAvailable = false
+    @State private var isRenaming = false
+    @State private var renameText = ""
 
     private let claudeOrange = Color(red: 0.85, green: 0.47, blue: 0.34)
     private let spinnerSymbols = ["·", "✢", "✳", "∗", "✻", "✽"]
@@ -153,10 +155,21 @@ struct InstanceRow: View {
 
             // Text content
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
+                if isRenaming {
+                    TextField("Session name", text: $renameText, onCommit: {
+                        AppSettings.setAlias(renameText.isEmpty ? nil : renameText, for: session.sessionId)
+                        isRenaming = false
+                    })
+                    .textFieldStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
-                    .lineLimit(1)
+                    .onExitCommand { isRenaming = false }
+                } else {
+                    Text(session.displayTitle)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
 
                 // Show tool call when waiting for approval, otherwise last activity
                 if isWaitingForApproval, let toolName = session.pendingToolName {
@@ -174,7 +187,7 @@ struct InstanceRow: View {
                             Text(input)
                                 .font(.system(size: 11))
                                 .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
+                                .lineLimit(2)
                         }
                     }
                 } else if let role = session.lastMessageRole {
@@ -281,6 +294,22 @@ struct InstanceRow: View {
         .onTapGesture(count: 2) {
             onChat()
         }
+        .contextMenu {
+            Button("Rename") {
+                renameText = session.displayTitle
+                isRenaming = true
+            }
+            Button("Open Chat") { onChat() }
+            if session.phase == .idle || session.phase == .waitingForInput {
+                Button("Archive") { onArchive() }
+            }
+            if AppSettings.alias(for: session.sessionId) != nil {
+                Divider()
+                Button("Clear Custom Name") {
+                    AppSettings.setAlias(nil, for: session.sessionId)
+                }
+            }
+        }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isWaitingForApproval)
         .background(
             RoundedRectangle(cornerRadius: 12)
@@ -346,13 +375,18 @@ struct InlineApprovalButtons: View {
             Button {
                 onReject()
             } label: {
-                Text("Deny")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.1))
-                    .clipShape(Capsule())
+                HStack(spacing: 3) {
+                    Text("Deny")
+                    Text("N")
+                        .font(.system(size: 9, weight: .regular, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.1))
+                .clipShape(Capsule())
             }
             .buttonStyle(.plain)
             .opacity(showDenyButton ? 1 : 0)
@@ -361,13 +395,18 @@ struct InlineApprovalButtons: View {
             Button {
                 onApprove()
             } label: {
-                Text("Allow")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.black)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.white.opacity(0.9))
-                    .clipShape(Capsule())
+                HStack(spacing: 3) {
+                    Text("Allow")
+                    Text("Y")
+                        .font(.system(size: 9, weight: .regular, design: .monospaced))
+                        .foregroundColor(.black.opacity(0.4))
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.black)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.9))
+                .clipShape(Capsule())
             }
             .buttonStyle(.plain)
             .opacity(showAllowButton ? 1 : 0)

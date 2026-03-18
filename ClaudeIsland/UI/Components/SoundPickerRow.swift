@@ -2,7 +2,8 @@
 //  SoundPickerRow.swift
 //  ClaudeIsland
 //
-//  Notification sound selection picker for settings menu
+//  Notification sound selection picker for settings menu.
+//  Supports per-event-type sound configuration.
 //
 
 import AppKit
@@ -10,15 +11,42 @@ import SwiftUI
 
 struct SoundPickerRow: View {
     @ObservedObject var soundSelector: SoundSelector
+    let eventType: SoundEventType?
     @State private var isHovered = false
-    @State private var selectedSound: NotificationSound = AppSettings.notificationSound
+    @State private var selectedSound: NotificationSound
+
+    /// Backwards-compatible init (global sound, no event type)
+    init(soundSelector: SoundSelector) {
+        self.soundSelector = soundSelector
+        self.eventType = nil
+        self._selectedSound = State(initialValue: AppSettings.notificationSound)
+    }
+
+    /// Per-event-type init
+    init(soundSelector: SoundSelector, eventType: SoundEventType) {
+        self.soundSelector = soundSelector
+        self.eventType = eventType
+        self._selectedSound = State(initialValue: AppSettings.soundForEvent(eventType))
+    }
+
+    private var expandedKey: String {
+        eventType?.rawValue ?? "global"
+    }
 
     private var isExpanded: Bool {
-        soundSelector.isPickerExpanded
+        soundSelector.expandedPickerKey == expandedKey
     }
 
     private func setExpanded(_ value: Bool) {
-        soundSelector.isPickerExpanded = value
+        soundSelector.expandedPickerKey = value ? expandedKey : nil
+    }
+
+    private var label: String {
+        eventType?.rawValue ?? "Notification Sound"
+    }
+
+    private var icon: String {
+        eventType?.icon ?? "speaker.wave.2"
     }
 
     var body: some View {
@@ -30,12 +58,12 @@ struct SoundPickerRow: View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "speaker.wave.2")
+                    Image(systemName: icon)
                         .font(.system(size: 12))
                         .foregroundColor(textColor)
                         .frame(width: 16)
 
-                    Text("Notification Sound")
+                    Text(label)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(textColor)
 
@@ -74,7 +102,11 @@ struct SoundPickerRow: View {
                                     NSSound(named: soundName)?.play()
                                 }
                                 selectedSound = sound
-                                AppSettings.notificationSound = sound
+                                if let eventType = eventType {
+                                    AppSettings.setSoundForEvent(eventType, sound: sound)
+                                } else {
+                                    AppSettings.notificationSound = sound
+                                }
                             }
                         }
                     }
@@ -85,7 +117,11 @@ struct SoundPickerRow: View {
             }
         }
         .onAppear {
-            selectedSound = AppSettings.notificationSound
+            if let eventType = eventType {
+                selectedSound = AppSettings.soundForEvent(eventType)
+            } else {
+                selectedSound = AppSettings.notificationSound
+            }
         }
     }
 

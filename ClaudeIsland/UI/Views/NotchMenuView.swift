@@ -20,6 +20,7 @@ struct NotchMenuView: View {
     @ObservedObject private var soundSelector = SoundSelector.shared
     @State private var hooksInstalled: Bool = false
     @State private var launchAtLogin: Bool = false
+    @State private var directActionHotkeys: Bool = AppSettings.directActionHotkeys
 
     var body: some View {
         VStack(spacing: 4) {
@@ -37,7 +38,11 @@ struct NotchMenuView: View {
 
             // Appearance settings
             ScreenPickerRow(screenSelector: screenSelector)
-            SoundPickerRow(soundSelector: soundSelector)
+
+            // Per-event-type sound pickers
+            ForEach(SoundEventType.allCases, id: \.self) { eventType in
+                SoundPickerRow(soundSelector: soundSelector, eventType: eventType)
+            }
 
             Divider()
                 .background(Color.white.opacity(0.08))
@@ -74,6 +79,16 @@ struct NotchMenuView: View {
                     HookInstaller.installIfNeeded()
                     hooksInstalled = true
                 }
+            }
+
+            MenuToggleRow(
+                icon: "keyboard",
+                label: "Direct Hotkeys",
+                isOn: directActionHotkeys
+            ) {
+                directActionHotkeys.toggle()
+                AppSettings.directActionHotkeys = directActionHotkeys
+                HotKeyManager.shared.mode = directActionHotkeys ? .directAction : .panelFirst
             }
 
             AccessibilityRow(isEnabled: AXIsProcessTrusted())

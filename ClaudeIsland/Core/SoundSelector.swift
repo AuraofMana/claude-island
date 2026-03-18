@@ -14,7 +14,14 @@ class SoundSelector: ObservableObject {
 
     // MARK: - Published State
 
-    @Published var isPickerExpanded: Bool = false
+    /// Which picker is currently expanded (by key), or nil if none
+    @Published var expandedPickerKey: String? = nil
+
+    /// Legacy compatibility: whether any picker is expanded
+    var isPickerExpanded: Bool {
+        get { expandedPickerKey != nil }
+        set { expandedPickerKey = newValue ? "global" : nil }
+    }
 
     // MARK: - Constants
 
@@ -28,9 +35,9 @@ class SoundSelector: ObservableObject {
 
     // MARK: - Public API
 
-    /// Extra height needed when picker is expanded (capped for scrolling)
+    /// Extra height needed when any picker is expanded (capped for scrolling)
     var expandedPickerHeight: CGFloat {
-        guard isPickerExpanded else { return 0 }
+        guard expandedPickerKey != nil else { return 0 }
         let totalOptions = NotificationSound.allCases.count
         let visibleOptions = min(totalOptions, maxVisibleOptions)
         return CGFloat(visibleOptions) * rowHeight + 8 // +8 for padding

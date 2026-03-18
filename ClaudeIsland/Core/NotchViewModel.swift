@@ -53,13 +53,41 @@ class NotchViewModel: ObservableObject {
 
     // MARK: - Geometry
 
-    let geometry: NotchGeometry
+    private(set) var geometry: NotchGeometry
     let spacing: CGFloat = 12
     let hasPhysicalNotch: Bool
 
     var deviceNotchRect: CGRect { geometry.deviceNotchRect }
     var screenRect: CGRect { geometry.screenRect }
     var windowHeight: CGFloat { geometry.windowHeight }
+
+    // MARK: - Drag State
+
+    /// Current drag offset (transient, during active drag)
+    @Published var dragOffset: CGFloat = 0
+
+    /// Persisted base offset (from AppSettings)
+    private var baseOffset: CGFloat = AppSettings.notchOffsetX
+
+    /// Total offset for SwiftUI view positioning
+    var totalOffset: CGFloat { baseOffset + dragOffset }
+
+    /// Update the drag offset during a drag gesture
+    func updateDragOffset(_ delta: CGFloat) {
+        let maxOff = geometry.maxOffset
+        let proposed = baseOffset + delta
+        dragOffset = max(-maxOff, min(proposed, maxOff)) - baseOffset
+        // Update geometry for hit-testing during drag
+        geometry = geometry.withOffset(baseOffset + dragOffset)
+    }
+
+    /// Commit the drag offset and persist
+    func commitDragOffset() {
+        baseOffset = max(-geometry.maxOffset, min(baseOffset + dragOffset, geometry.maxOffset))
+        dragOffset = 0
+        AppSettings.notchOffsetX = baseOffset
+        geometry = geometry.withOffset(baseOffset)
+    }
 
     /// Dynamic opened size based on content type
     var openedSize: CGSize {
@@ -99,11 +127,14 @@ class NotchViewModel: ObservableObject {
     // MARK: - Initialization
 
     init(deviceNotchRect: CGRect, screenRect: CGRect, windowHeight: CGFloat, hasPhysicalNotch: Bool) {
+        let savedOffset = AppSettings.notchOffsetX
         self.geometry = NotchGeometry(
             deviceNotchRect: deviceNotchRect,
             screenRect: screenRect,
-            windowHeight: windowHeight
+            windowHeight: windowHeight,
+            horizontalOffset: savedOffset
         )
+        self.baseOffset = savedOffset
         self.hasPhysicalNotch = hasPhysicalNotch
         setupEventHandlers()
         observeSelectors()
@@ -114,7 +145,7 @@ class NotchViewModel: ObservableObject {
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
 
-        soundSelector.$isPickerExpanded
+        soundSelector.$expandedPickerKey
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
     }
