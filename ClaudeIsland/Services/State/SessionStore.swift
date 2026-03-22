@@ -262,13 +262,17 @@ actor SessionStore {
 
         case "PostToolUse":
             if event.tool == "Task" {
-                Self.logger.debug("PostToolUse for Task received (subagent still running)")
+                ToolEventProcessor.processSubagentPostToolUse(event: event, session: &session)
             }
 
         case "SubagentStop":
             // SubagentStop fires when a subagent completes - stop tracking
-            // Subagent tools are populated from agent file in processFileUpdated
-            Self.logger.debug("SubagentStop received")
+            if let toolUseId = event.toolUseId {
+                session.subagentState.stopTask(taskToolId: toolUseId)
+                Self.logger.debug("SubagentStop: stopped tracking task \(toolUseId.prefix(12), privacy: .public)")
+            } else {
+                Self.logger.debug("SubagentStop received but no toolUseId to clean up")
+            }
 
         default:
             break
