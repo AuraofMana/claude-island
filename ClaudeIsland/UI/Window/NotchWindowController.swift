@@ -62,8 +62,10 @@ class NotchWindowController: NSWindowController {
         notchWindow.setFrame(windowFrame, display: true)
 
         // Dynamically toggle mouse event handling based on notch state:
-        // - Closed: ignoresMouseEvents = true (clicks pass through to menu bar/apps)
         // - Opened: ignoresMouseEvents = false (buttons inside panel work)
+        // - Closed/popping: ignoresMouseEvents = false ONLY when mouse is over the notch
+        //   area, so the click is consumed by our window instead of passing through to
+        //   apps behind us (e.g., Chrome tabs). Otherwise ignoresMouseEvents = true.
         viewModel.$status
             .receive(on: DispatchQueue.main)
             .sink { [weak notchWindow, weak viewModel] status in
@@ -77,8 +79,27 @@ class NotchWindowController: NSWindowController {
                         notchWindow?.makeKey()
                     }
                 case .closed, .popping:
-                    // Ignore mouse events when closed so clicks pass through
-                    notchWindow?.ignoresMouseEvents = true
+                    // Check if mouse is currently over the notch area
+                    let mouseIsOverNotch = viewModel?.geometry.isPointInNotch(NSEvent.mouseLocation) ?? false
+                    notchWindow?.ignoresMouseEvents = !mouseIsOverNotch
+                }
+            }
+            .store(in: &cancellables)
+
+        // When the mouse moves, preemptively accept events if it's over the notch.
+        // This ensures that by the time the user clicks, our window consumes the click
+        // instead of it passing through to apps behind us.
+        EventMonitors.shared.mouseLocation
+            .receive(on: DispatchQueue.main)
+            .sink { [weak notchWindow, weak self] location in
+                guard let vm = self?.viewModel else { return }
+                switch vm.status {
+                case .opened:
+                    // Already accepting events
+                    break
+                case .closed, .popping:
+                    let overNotch = vm.geometry.isPointInNotch(location)
+                    notchWindow?.ignoresMouseEvents = !overNotch
                 }
             }
             .store(in: &cancellables)

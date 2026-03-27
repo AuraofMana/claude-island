@@ -1,7 +1,7 @@
 # Claude Island (Fork) — Status
 
 **Started:** 2026-03-18
-**Last updated:** 2026-03-19
+**Last updated:** 2026-03-24
 
 ## What This Is
 Personal fork of Claude Island (macOS notch overlay for monitoring Claude Code sessions). Five custom features added on top of upstream v1.2.
@@ -20,11 +20,20 @@ Features:
 - Install Xcode and build the project
 - Add 2 new files to Xcode project navigator: `SoundCooldownManager.swift`, `HotKeyManager.swift`
 - Fix any compile errors (written without build verification)
+- Test the click-through fix (Bug 3) with Chrome behind the notch
 - Test all 5 features with live Claude Code sessions
 - Test multi-monitor for drag feature
 - Windows support deferred (would need a separate Tauri/Electron app)
 
 ## Known Bugs (to fix after initial build-test)
+
+### Bug 3: Click-through to apps behind notch button (FIXED, untested)
+Clicking the closed notch button to open it also sends the click to the window behind (e.g., Chrome tabs). User clicks are passed to background apps.
+
+**Root cause:** `NSEvent.addGlobalMonitorForEvents` is observe-only — it cannot consume events. When `ignoresMouseEvents = true` (closed state), the click passes through to the app behind, and the global monitor merely observes it afterward.
+
+**Fix (applied in NotchWindowController.swift):** Subscribe to `EventMonitors.shared.mouseLocation` and preemptively set `ignoresMouseEvents = false` when the mouse hovers over the notch area, even while closed. By the time the user clicks, the window already accepts the event and it never reaches Chrome. When the mouse moves away, `ignoresMouseEvents` returns to `true`.
+
 
 ### Bug 1: Stale permission badge after terminal approval
 When you approve a tool in the terminal, Claude Island keeps showing the "needs approval" state until the tool finishes executing (`PostToolUse` hook fires). For long-running tools (10+ min bash commands), this means a stale badge for the entire duration.
